@@ -1,0 +1,17 @@
+{
+  "name": "cardano-nft",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "npx tsx minting.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@meshsdk/core": "^1.9.0-beta.2",
+    "tsx": "^4.19.3"
+  }
+}
