@@ -1,6 +1,11 @@
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
-import { Asset, deserializeAddress, ForgeScript, resolveScriptHash, stringToHex } from "@meshsdk/core";
+import {
+  deserializeAddress,
+  ForgeScript,
+  resolveScriptHash,
+  stringToHex,
+} from "@meshsdk/core";
 import fs from "node:fs";
 import {
   BlockfrostProvider,
@@ -9,22 +14,26 @@ import {
   UTxO,
 } from "@meshsdk/core";
 import fetch from 'node-fetch';
+import { createHash } from 'crypto'; // Import for hashing
 
 const app = express();
 const port = 3000;
 
 app.use(express.json());
 
-// Blockchain setup
-const blockchainProvider = new BlockfrostProvider("previewXbDbd9sb7sZVQgdjypsxgVRFvZEGhdQK");
+// 1. USE ENVIRONMENT VARIABLES
+const blockfrostApiKey = process.env.BLOCKFROST_API_KEY || "previewXbDbd9sb7sZVQgdjypsxgVRFvZEGhdQK"; // Fallback for development
+const blockchainProvider = new BlockfrostProvider(blockfrostApiKey);
+
+const secretKey = process.env.WALLET_SECRET_KEY || fs.readFileSync("me.sk").toString(); // Fallback for development
 const wallet = new MeshWallet({
-  networkId: 0,
-  fetcher: blockchainProvider,
-  submitter: blockchainProvider,
-  key: {
-    type: "root",
-    bech32: fs.readFileSync("me.sk").toString(),
-  },
+    networkId: 0,
+    fetcher: blockchainProvider,
+    submitter: blockchainProvider,
+    key: {
+        type: "root",
+        bech32: secretKey,
+    },
 });
 
 function getTxBuilder() {
@@ -34,7 +43,7 @@ function getTxBuilder() {
   });
 }
 
-// Swagger UI setup
+// Swagger UI setup (same as your original code)
 const swaggerDocument = {
   openapi: '3.0.0',
   info: {
@@ -67,14 +76,15 @@ const swaggerDocument = {
           }
         },
         responses: {
-          '200': { 
+          '200': {
             description: 'NFT minted successfully',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
-                    txHash: { type: 'string' }
+                    txHash: { type: 'string' },
+                    assetId: {type: 'string'}
                   }
                 }
               }
@@ -122,38 +132,36 @@ const swaggerDocument = {
     }
   }
 };
-
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // POST endpoint to receive metadata and mint NFT
 app.post('/api/metadata', async (req, res) => {
   const metadata = req.body;
 
-  if (!metadata.vehicleNumber || !metadata.inspectionDate || !metadata.inspectorId || 
+  if (!metadata.vehicleNumber || !metadata.inspectionDate || !metadata.inspectorId ||
       !metadata.mileage || !metadata.status || !metadata.pdfurl) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
   try {
-    const assets: Asset[] = [
-      {
-        unit: "lovelace",
-        quantity: "1000000",
-      },
-    ];
-
+    // 2. & 3.  HASHING AND REMOVE ASSETS (These go together)
     const utxos = await wallet.getUtxos();
     const walletAddress = (await wallet.getUsedAddresses())[0];
-    const forgingScript = ForgeScript.withOneSignature(walletAddress);
-
+    const forgingScript = ForgeScript.withOneSignature(walletAddress); // Keep original policy
     const policyId = resolveScriptHash(forgingScript);
-    const tokenName = "PT. Inspeksi Mobil Jogja";
-    const tokenNameHex = stringToHex(tokenName);
-    const nftMetadata = { [policyId]: { [tokenName]: { ...metadata } } };
 
-    const signerHash = deserializeAddress(walletAddress).pubKeyHash;
+    // Generate unique token name using SHA-256 hashing
+    const hash = createHash('sha256');
+    const dataToHash = `${metadata.vehicleNumber}-${metadata.inspectionDate}-${metadata.inspectorId}`;
+    hash.update(dataToHash);
+    const tokenName = hash.digest('hex').substring(0, 32); // Truncate to 32 bytes
+    const tokenNameHex = stringToHex(tokenName);
+    const assetId = policyId + tokenNameHex;
+    const nftMetadata = { [policyId]: { [tokenName]: { ...metadata,  name: `CarInspection-${tokenName}` } } };
+
     const txBuilder = getTxBuilder();
 
+    // Remove the 'assets' array.  MeshTxBuilder handles UTXO.
     const unsignedTx = await txBuilder
       .mint("1", policyId, tokenNameHex)
       .mintingScript(forgingScript)
@@ -165,14 +173,15 @@ app.post('/api/metadata', async (req, res) => {
     const signedTx = await wallet.signTx(unsignedTx);
     const txHash = await wallet.submitTx(signedTx);
 
-    res.json({ txHash });
+    res.json({ txHash, assetId }); // Return txHash
+
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to mint NFT' });
+     res.status(500).json({ error: 'Failed to mint NFT', details: error.message }); // Improved error
   }
 });
 
-// GET endpoint to retrieve transaction metadata from Blockfrost
+// GET endpoint (USE ENVIRONMENT VARIABLE)
 app.get('/api/metadata/:txHash', async (req, res) => {
   const { txHash } = req.params;
 
@@ -183,7 +192,7 @@ app.get('/api/metadata/:txHash', async (req, res) => {
   try {
     const response = await fetch(`https://cardano-preview.blockfrost.io/api/v0/txs/${txHash}/metadata`, {
       headers: {
-        'project_id': 'previewXbDbd9sb7sZVQgdjypsxgVRFvZEGhdQK' // Your Blockfrost API key
+        'project_id': blockfrostApiKey // Use the environment variable
       }
     });
 
@@ -193,9 +202,11 @@ app.get('/api/metadata/:txHash', async (req, res) => {
 
     const metadata = await response.json();
     res.json(metadata);
+
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to retrieve transaction metadata' });
+     res.status(500).json({ error: 'Failed to retrieve transaction metadata', details:error.message }); // Improved error
+
   }
 });
 
