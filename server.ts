@@ -1,5 +1,5 @@
 import express from 'express';
-import swaggerUi from 'swagger-ui-express';
+import path from 'path'; 
 import {
   deserializeAddress,
   ForgeScript,
@@ -161,7 +161,6 @@ const swaggerDocument = {
     }
   }
 };
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // POST endpoint to receive metadata and mint NFT
 app.post('/api/metadata', async (req, res) => {
@@ -284,7 +283,15 @@ app.get('/api/nft/:assetId', async (req, res) => {
     }
 });
 
+app.get('/api-docs', (req, res) => { // Or choose another path like /reference
+  res.sendFile(path.join(__dirname, 'scalar-docs.html'));
+});
+
+app.get('/openapi.json', (req, res) => {
+  res.json(swaggerDocument); // Serve your existing swaggerDocument object
+});
+
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
-    console.log(`Swagger UI available at http://localhost:${port}/api-docs`);
+    console.log(`Scalar API Reference available at http://localhost:${port}/api-docs`);
 });
